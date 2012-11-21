@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 import datetime
 import os
@@ -6,16 +8,17 @@ import subprocess
 import sys
 import time
 
+
 def pid_children(root_pid):
     """
     Given a pid, return a list of the child pids and their argv
 
     This is not recursive.  The argv is returned so that the Postgres
     Archiver process can be spared from throttling.
-    
+
     Raises an exception if the pid could not be found.
     """
-    p = subprocess.Popen(['ps' ,'--ppid=' + str(root_pid), '-o', 'pid=,args='],
+    p = subprocess.Popen(['ps', '--ppid=' + str(root_pid), '-o', 'pid=,args='],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = p.communicate()
@@ -34,8 +37,10 @@ def pid_children(root_pid):
     parts = [line.split(' ', 1) for line in stdout.strip().split('\n')]
     return [(int(pid), args) for (pid, args) in parts]
 
+
 def is_archiver(argv):
     return argv.find('archiver') >= 0
+
 
 def force_naptime(parent_pid, nap_quantum):
     """
@@ -57,12 +62,12 @@ def force_naptime(parent_pid, nap_quantum):
 
     def stop_pid_and_record(pid):
         children_maybe_stopped.add(pid)
-        os.kill(pid, SIGCONT)        
+        os.kill(pid, SIGCONT)
 
     try:
         # Stop the parent first, so it cannot create children.
         os.kill(parent_pid, SIGSTOP)
-        
+
         children = pid_children(parent_pid)
 
         # Send SIGSTOP to children, except the archiver.
@@ -80,6 +85,7 @@ def force_naptime(parent_pid, nap_quantum):
 
         os.kill(parent_pid, SIGCONT)
 
+
 def force_wake(parent_pid):
     """
     A paranoid, unconditional wake-up call
@@ -89,7 +95,8 @@ def force_wake(parent_pid):
     handling by Python.
     """
     for pid in [parent_pid] + pid_children(parent_pid):
-        os.kill(parent_pid, SIGCONT)
+        os.kill(parent_pid, signal.SIGCONT)
+
 
 def nap_until(parent_pid, deadline, nap_quantum):
     """
@@ -99,16 +106,18 @@ def nap_until(parent_pid, deadline, nap_quantum):
     while datetime.datetime.now() < deadline:
         force_naptime(parent_pid, nap_quantum)
 
+
 def self_test():
     """
     Quick and dirty self-test
 
-    Gin up a process to throttle, throttle and wake it.
+    Exercises some code paths without much tooling.
     """
 
     print 'Beginning self test...'
 
-    print '  Testing un-limited speed of a process'
+    print '  Testing un-limited speed of a process; for comparison'
+
     def fork_burner(title):
         deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
         pid = os.fork()
@@ -122,11 +131,11 @@ def self_test():
             sys.exit(0)
         else:
             return int(pid)
-        
+
     pid = fork_burner('Unthrottled process')
     os.waitpid(pid, 0)
 
-    print '  Testing throttled process, it should loop fewer times'
+    print '  Testing throttled process; it should loop fewer times'
 
     # Deadline comes somewhat safely before the process finishes
     napper_deadline = datetime.datetime.now() + datetime.timedelta(seconds=4)
@@ -134,6 +143,15 @@ def self_test():
     pid = fork_burner('Throttled process')
     nap_until(pid, napper_deadline, 0.1)
     os.waitpid(pid, 0)
+
+    print '  Testing unconditional wake; should terminate'
+    pid = fork_burner('Paused process')
+    os.kill(pid, signal.SIGSTOP)
+    force_wake(pid)
+    os.waitpid(pid, 0)
+    print '  Woken.'
+    print 'Done.'
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -149,10 +167,13 @@ def main():
                                 help='parent process id to apply to')
 
     # Wake action
-    wake_action = subparsers.add_parser('wake', parents=[pid_arg_parent])
+    subparsers.add_parser('wake', parents=[pid_arg_parent],
+                          help='wake up a process and its children')
 
     # Nap action
-    nap_action = subparsers.add_parser('nap', parents=[pid_arg_parent])
+    nap_action = subparsers.add_parser('nap', parents=[pid_arg_parent],
+                                       help=('make a process and its children '
+                                             'pause frequently'))
     nap_action.add_argument('duration', type=int,
                             help='number of minutes to incur naps for')
     nap_action.add_argument('--quantum', type=float, default=0.3,
@@ -160,7 +181,8 @@ def main():
                                   'floating point supported'))
 
     # Self-test action
-    nap_action = subparsers.add_parser('self-test', help='Do a quick self-test')
+    nap_action = subparsers.add_parser('self-test',
+                                       help='Do a quick self-test')
 
     args = parser.parse_args()
 
