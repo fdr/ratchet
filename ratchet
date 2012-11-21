@@ -34,7 +34,8 @@ def pid_children(root_pid):
             raise Exception('process listing did not complete successfully: ' +
                             stderr)
 
-    parts = [line.split(' ', 1) for line in stdout.strip().split('\n')]
+    parts = [line.strip().split(' ', 1)
+             for line in stdout.strip().split('\n')]
     return [(int(pid), args) for (pid, args) in parts]
 
 
@@ -98,13 +99,14 @@ def force_wake(parent_pid):
         os.kill(parent_pid, signal.SIGCONT)
 
 
-def nap_until(parent_pid, deadline, nap_quantum):
+def nap_until(parent_pid, deadline, nap_quantum, wake_quantum):
     """
     Cause continuous napping until some future datetime.
 
     """
     while datetime.datetime.now() < deadline:
         force_naptime(parent_pid, nap_quantum)
+        time.sleep(wake_quantum)
 
 
 def self_test():
@@ -141,7 +143,7 @@ def self_test():
     napper_deadline = datetime.datetime.now() + datetime.timedelta(seconds=4)
 
     pid = fork_burner('Throttled process')
-    nap_until(pid, napper_deadline, 0.1)
+    nap_until(pid, napper_deadline, 0.5, 0.1)
     os.waitpid(pid, 0)
 
     print '  Testing unconditional wake; should terminate'
@@ -176,9 +178,13 @@ def main():
                                              'pause frequently'))
     nap_action.add_argument('duration', type=int,
                             help='number of minutes to incur naps for')
-    nap_action.add_argument('--quantum', type=float, default=0.3,
+    nap_action.add_argument('--nap-quantum', type=float, default=0.3,
                             help=('number of seconds to pause at a time; '
                                   'floating point supported'))
+    nap_action.add_argument('--wake-quantum', type=float, default=0.3,
+                            help=('number of seconds to remain running '
+                                  'at a time; floating point supported'))
+
 
     # Self-test action
     nap_action = subparsers.add_parser('self-test',
@@ -191,7 +197,7 @@ def main():
     elif args.action == 'nap':
         deadline = (datetime.datetime.now() +
                     datetime.timedelta(minutes=1 * args.duration))
-        nap_until(args.pid, deadline, args.quantum)
+        nap_until(args.pid, deadline, args.nap_quantum, args.wake_quantum)
     elif args.action == 'self-test':
         self_test()
     else:
