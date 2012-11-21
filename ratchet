@@ -62,7 +62,7 @@ def force_naptime(parent_pid, nap_quantum):
 
     def stop_pid_and_record(pid):
         children_maybe_stopped.add(pid)
-        os.kill(pid, SIGCONT)
+        os.kill(pid, SIGSTOP)
 
     try:
         # Stop the parent first, so it cannot create children.
