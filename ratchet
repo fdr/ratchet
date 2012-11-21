@@ -1,12 +1,44 @@
 #!/usr/bin/env python
-
 import argparse
 import datetime
 import os
+import re
 import signal
+import socket
 import subprocess
 import sys
 import time
+
+
+def port_to_pid(port):
+    """
+    Maps a port being listened upon to a PID
+
+    This is useful to stop the root process of network servers.  Left
+    untreated is the case of multiple bindings to the same port on
+    different interfaces: multiple matches will result in an
+    exception.
+    """
+
+    p = subprocess.Popen(
+        ['lsof', '-P', '-n', '-i',
+         'TCP:' + str(port), '-s', 'TCP:LISTEN', '-Fp'],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    stdout, stderr = p.communicate()
+
+    if p.wait() != 0:
+        return None
+    else:
+        m = re.match(r'^p(?P<pid>\d+)$', stdout)
+
+        if m:
+            return int(m.groupdict()['pid'])
+        else:
+            raise Exception('pid-to-port returns normally but has '
+                            'incomprehensible output: {0}'.format(stdout))
+
+    raise AssertionError('Unintended branch fallthrough')
 
 
 def pid_children(root_pid):
@@ -125,11 +157,21 @@ def self_test():
 
     print '  Testing un-limited speed of a process; for comparison'
 
+    TEST_ADDR = ('0.0.0.0', 12341)
+
     def fork_burner(title):
         deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
         pid = os.fork()
         if pid == 0:
-            # is the victim/child
+            # In this flow of control: in the victim/child process
+
+            # Listen on a socket to test the port-to-pid resolution.
+            # Vestigial in tests that do not support it, and
+            # cleared/freed by exiting the entire process.
+            s = socket.socket()
+            s.bind(TEST_ADDR)
+            s.listen(0)
+
             i = 0
             while datetime.datetime.now() < deadline:
                 i += 1
@@ -157,6 +199,18 @@ def self_test():
     force_wake(pid)
     os.waitpid(pid, 0)
     print '  Woken.'
+
+    print '  Test port-pid resolution'
+    pid = fork_burner('Process just to bind a port')
+    found_pid = port_to_pid(TEST_ADDR[1])
+    if found_pid != pid:
+        raise Exception('Mismatch: created pid was {0}, '
+                        'but resolved the pid {1}'.format(pid, found_pid))
+    else:
+        print '  ...resolved properly'
+
+    os.kill(pid, signal.SIGTERM)
+
     print 'Done.'
 
 
@@ -167,18 +221,19 @@ def main():
 
     subparsers = parser.add_subparsers(title='actions', dest='action')
 
-    # Parent parser for positional PID argument that is seen in
-    # multiple commands.
-    pid_arg_parent = argparse.ArgumentParser(add_help=False)
-    pid_arg_parent.add_argument('pid', type=int,
-                                help='parent process id to apply to')
+    # Parent parser for PID-or-Port options that is seen in multiple
+    # commands.
+    portpid_parent = argparse.ArgumentParser(add_help=False)
+    group = portpid_parent.add_mutually_exclusive_group(required=True)
+    group.add_argument('--pid', type=int, help='parent process id to apply to')
+    group.add_argument('--port', type=int, help='bound port to find pid for')
 
     # Wake action
-    subparsers.add_parser('wake', parents=[pid_arg_parent],
+    subparsers.add_parser('wake', parents=[portpid_parent],
                           help='wake up a process and its children')
 
     # Nap action
-    nap_action = subparsers.add_parser('nap', parents=[pid_arg_parent],
+    nap_action = subparsers.add_parser('nap', parents=[portpid_parent],
                                        help=('make a process and its children '
                                              'pause frequently'))
     nap_action.add_argument('duration', type=int,
@@ -190,12 +245,21 @@ def main():
                             help=('number of seconds to remain running '
                                   'at a time; floating point supported'))
 
-
     # Self-test action
     nap_action = subparsers.add_parser('self-test',
                                        help='Do a quick self-test')
 
     args = parser.parse_args()
+
+    # If a port was provided instead of a pid, canonicalize by finding
+    # the pid and writing it into the args value.
+    if hasattr(args, 'port'):
+        pid = port_to_pid(args.port)
+        if pid is None:
+            print 'Could not resolve port {0} to a PID'.format(pid)
+            return 1
+        else:
+            args.pid = pid
 
     if args.action == 'wake':
         force_wake(args.pid)
@@ -210,4 +274,4 @@ def main():
             "parser.parse_args should have rejected this input already")
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
