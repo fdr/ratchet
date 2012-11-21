@@ -79,8 +79,7 @@ def force_naptime(parent_pid, nap_quantum):
         # Wait around a while while everyone is taking a nap
         time.sleep(nap_quantum)
     finally:
-        # First wake up the children, and the parent last, again
-        # because the parent (postmaster) may spawn more processes.
+        # Wake everyone up
         for pid in children_maybe_stopped:
             os.kill(pid, SIGCONT)
 
