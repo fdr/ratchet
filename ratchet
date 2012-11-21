@@ -96,7 +96,13 @@ def force_wake(parent_pid):
     handling by Python.
     """
     for pid in [parent_pid] + pid_children(parent_pid):
-        os.kill(parent_pid, signal.SIGCONT)
+        try:
+            os.kill(parent_pid, signal.SIGCONT)
+        except:
+            # Stop at nothing and soldier on, including processes that
+            # may disappear for whatever reason (kernel or concurrent
+            # user shenanigans, such as kill -9 by an operator)
+            pass
 
 
 def nap_until(parent_pid, deadline, nap_quantum, wake_quantum):
