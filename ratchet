@@ -4,7 +4,6 @@ import datetime
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -152,6 +151,7 @@ def self_test():
 
     Exercises some code paths without much tooling.
     """
+    import socket
 
     print 'Beginning self test...'
 
