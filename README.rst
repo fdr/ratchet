@@ -31,7 +31,9 @@ Usage
 
 The output of ``./ratchet -h``::
 
-    usage: ratchet [-h] {wake,nap,self-test} ...
+    The output of ``./ratchet -h``::
+
+    usage: ratchet [-h] {wake,renice,nap,self-test} ...
 
     Continuously send SIGSTOP and SIGCONT to throttle process activity
 
@@ -39,8 +41,9 @@ The output of ``./ratchet -h``::
       -h, --help            show this help message and exit
 
     actions:
-      {wake,nap,self-test}
+      {wake,renice,nap,self-test}
         wake                wake up a process and its children
+        renice              change niceness values for postmaster children
         nap                 make a process and its children pause frequently
         self-test           Do a quick self-test
 
@@ -54,12 +57,15 @@ been useful for development iteration on this small tool::
     $ ./ratchet self-test
     Beginning self test...
       Testing un-limited speed of a process; for comparison
-    Unthrottled process: counted 3413739 times
+    Unthrottled process: counted 3371227 times
       Testing throttled process; it should loop fewer times
-    Throttled process: counted 904513 times
+    Throttled process: counted 908915 times
       Testing unconditional wake; should terminate
-    Paused process: counted 3367375 times
+    Paused process: counted 3385802 times
       Woken.
       Test port-pid resolution
       ...resolved properly
+      Test renicing
+    Reniced process: counted 3386670 times
+      Summary: succeeded=2 failed=0
     Done.

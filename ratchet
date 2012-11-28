@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import collections
 import datetime
 import os
 import re
@@ -40,12 +41,20 @@ def port_to_pid(port):
     raise AssertionError('Unintended branch fallthrough')
 
 
+class OSProcess(collections.namedtuple(
+        'OSProcess', ['pid', 'argv'])):
+
+    def is_archiver(self):
+        return self.argv.find('archiver') >= 0
+
+
 def pid_children(root_pid):
     """
-    Given a pid, return a list of the child pids and their argv
+    Given a pid, return a list of the child OSProcess-es.
 
     This is not recursive.  The argv is returned so that the Postgres
-    Archiver process can be spared from throttling.
+    Archiver process can be spared from throttling by using string
+    matching to identify it.
 
     Raises an exception if the pid could not be found.
     """
@@ -67,11 +76,8 @@ def pid_children(root_pid):
 
     parts = [line.strip().split(' ', 1)
              for line in stdout.strip().split('\n')]
-    return [(int(pid), args) for (pid, args) in parts]
 
-
-def is_archiver(argv):
-    return argv.find('archiver') >= 0
+    return [OSProcess(pid=int(pid), argv=argv) for (pid, argv) in parts]
 
 
 def force_naptime(parent_pid, nap_quantum):
@@ -103,9 +109,9 @@ def force_naptime(parent_pid, nap_quantum):
         children = pid_children(parent_pid)
 
         # Send SIGSTOP to children, except the archiver.
-        for pid, argv in children:
-            if not is_archiver(argv):
-                stop_pid_and_record(pid)
+        for osp in children:
+            if not osp.is_archiver():
+                stop_pid_and_record(osp.pid)
 
         # Wait around a while while everyone is taking a nap
         time.sleep(nap_quantum)
@@ -125,7 +131,7 @@ def force_wake(parent_pid):
     program was termianted by an OOM killer or even just sketchy OOM
     handling by Python.
     """
-    for pid in [parent_pid] + pid_children(parent_pid):
+    for pid in [parent_pid] + [osp.pid for osp in pid_children(parent_pid)]:
         try:
             os.kill(parent_pid, signal.SIGCONT)
         except:
@@ -163,6 +169,11 @@ def self_test():
         deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
         pid = os.fork()
         if pid == 0:
+            # Have a soon-zombie child process to exercise some other
+            # code paths.
+            if os.fork() == 0:
+                sys.exit(0)
+
             # In this flow of control: in the victim/child process
 
             # Listen on a socket to test the port-to-pid resolution.
@@ -211,7 +222,65 @@ def self_test():
 
     os.kill(pid, signal.SIGTERM)
 
+    print '  Test renicing'
+    pid = fork_burner('Reniced process')
+    summary = maybe_renice(pid, 10, 11, 5)
+    os.waitpid(pid, 0)
+
+    print '  Summary: succeeded={0} failed={1}'.format(*summary)
+
     print 'Done.'
+
+
+def maybe_renice(parent_pid, parent_nice, child_nice, archiver_nice):
+    """
+    Attempt renicing a postmaster and its children
+
+    This procedure implements renicing a postmaster and its children
+    per the arguments.  However, it is an attempt to do so, not a
+    guarantee -- in particular, PIDs may disappear, causing
+    """
+
+    # Check is any niceness settings are below zero and error if we're
+    # not root.
+    if (any(ns < 0 for ns in [parent_nice, child_nice, archiver_nice]) and
+        os.getuid() != 0):
+        raise Exception('Ratchet can only set negative niceness settings '
+                        'if run as root')
+
+    # Gross way to get side effects to neatly summarize how many
+    # renicings succeeded, since CPython closures don't support such
+    # mutations.
+    renice_stats = [0, 0]
+
+    def do_renicing(osps, ni):
+        for osp in osps:
+            with open(os.devnull) as devnull:
+                ret = subprocess.call(['renice', str(ni), str(osp.pid)],
+                                      stdout=devnull)
+
+                if ret == 0:
+                    renice_stats[0] += 1
+                else:
+                    renice_stats[1] += 1
+
+    # Make a bogus argv for the OSProcess, because it's not worth
+    # fetching the actual process title, and it is known that the
+    # archiver-niceness setting will never match the parent process,
+    # the postmaster.
+    parent = OSProcess(pid=parent_pid, argv='postmaster')
+
+    # Renice the parent before calling pid_children, so new children
+    # of postmaster have the new niceness.
+    do_renicing([parent], parent_nice)
+
+    children = pid_children(parent_pid)
+    archivers = [child for child in children if child.is_archiver()]
+
+    do_renicing(children, child_nice)
+    do_renicing(archivers, archiver_nice)
+
+    return tuple(renice_stats)
 
 
 def main():
@@ -231,6 +300,19 @@ def main():
     # Wake action
     subparsers.add_parser('wake', parents=[portpid_parent],
                           help='wake up a process and its children')
+
+    # Renice action
+    renice_action = subparsers.add_parser(
+        'renice', parents=[portpid_parent],
+        help='change niceness values for postmaster children')
+
+    renice_action.add_argument(
+        '-p', '--postmaster', type=int, required=True,
+        help='niceness value for the postmaster process')
+    renice_action.add_argument('-a', '--archiver', type=int, required=True,
+                               help='niceness value for the archiver process')
+    renice_action.add_argument('-b', '--backend', type=int, required=True,
+                               help='niceness value for the backend processes')
 
     # Nap action
     nap_action = subparsers.add_parser('nap', parents=[portpid_parent],
@@ -267,6 +349,11 @@ def main():
         deadline = (datetime.datetime.now() +
                     datetime.timedelta(minutes=1 * args.duration))
         nap_until(args.pid, deadline, args.nap_quantum, args.wake_quantum)
+    elif args.action == 'renice':
+        maybe_renice(args.pid,
+                     parent_nice=args.postmaster,
+                     child_nice=args.backend,
+                     archiver_nice=args.archiver)
     elif args.action == 'self-test':
         self_test()
     else:
