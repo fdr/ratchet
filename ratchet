@@ -338,7 +338,7 @@ def main():
     if hasattr(args, 'port'):
         pid = port_to_pid(args.port)
         if pid is None:
-            print 'Could not resolve port {0} to a PID'.format(pid)
+            print 'Could not resolve port {0} to a PID'.format(args.port)
             return 1
         else:
             args.pid = pid
