@@ -320,10 +320,10 @@ def main():
                                              'pause frequently'))
     nap_action.add_argument('duration', type=int,
                             help='number of minutes to incur naps for')
-    nap_action.add_argument('--nap-quantum', type=float, default=0.3,
+    nap_action.add_argument('--nap-quantum', type=float, default=1,
                             help=('number of seconds to pause at a time; '
                                   'floating point supported'))
-    nap_action.add_argument('--wake-quantum', type=float, default=0.3,
+    nap_action.add_argument('--wake-quantum', type=float, default=0.1,
                             help=('number of seconds to remain running '
                                   'at a time; floating point supported'))
 
