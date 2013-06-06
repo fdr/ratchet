@@ -49,10 +49,38 @@ class OSProcess(collections.namedtuple(
             return self.argv.find(s) >= 0
 
         is_postmaster = contains('-D') and contains('config_file=')
+
+        # Don't throttle the archiver; its progress is how the
+        # situation is freed up.
         is_archiver = contains('archiver')
+
+        # Don't throttle the log collector: that has been observed to
+        # cause the archiver to have problems running since it sends
+        # its logs to stderr, absorbed by the same.
         is_logcollector = contains('logger')
 
-        return any([is_archiver, is_logcollector, is_postmaster])
+        # Don't throttle checkpoints, either user triggered or the
+        # 'checkpointer' in 9.2+.  Checkpoints is a time when Postgres
+        # opts to look at deleting WAL off the disk, so it's desirable
+        # these continue to happen.
+        is_checkpoint_action = contains('checkpoint')
+
+        # Don't throttle the bgwriter or wal writer
+        # (counter-intuitively)
+        #
+        # This is so checkpoints can be successfully processed.  As
+        # the other processes in the system generating WAL will be
+        # heavily throttled, it seems okay to let these remain so
+        # checkpoints can happen.
+        is_wal_writer_or_bgwriter = contains('writer')
+
+        return any([
+                   is_postmaster,
+                   is_archiver,
+                   is_logcollector,
+                   is_checkpoint_action,
+                   is_wal_writer_or_bgwriter,
+                   ])
 
 
 def pid_children(root_pid):
