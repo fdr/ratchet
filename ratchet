@@ -138,7 +138,7 @@ def force_wake(parent_pid):
     """
     for pid in [parent_pid] + [osp.pid for osp in pid_children(parent_pid)]:
         try:
-            os.kill(parent_pid, signal.SIGCONT)
+            os.kill(pid, signal.SIGCONT)
         except:
             # Stop at nothing and soldier on, including processes that
             # may disappear for whatever reason (kernel or concurrent
