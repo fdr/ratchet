@@ -30,7 +30,8 @@ def port_to_pid(port):
     if p.wait() != 0:
         return None
     else:
-        stdout_str = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
+        stdout_str = stdout.decode(
+            'utf-8') if isinstance(stdout, bytes) else stdout
         m = re.match(r'^p(?P<pid>\d+)$', stdout_str)
 
         if m:
@@ -97,7 +98,8 @@ def pid_children(root_pid):
     stdout, stderr = p.communicate()
 
     if p.wait() != 0:
-        stderr_str = stderr.decode('utf-8') if isinstance(stderr, bytes) else stderr
+        stderr_str = stderr.decode(
+            'utf-8') if isinstance(stderr, bytes) else stderr
         if stderr_str == '':
             # ps likes to return 1 when no processes are returned.  It
             # makes no exit-code differentiation between 'erroneous
@@ -108,7 +110,8 @@ def pid_children(root_pid):
             raise Exception('process listing did not complete successfully: ' +
                             stderr_str)
 
-    stdout_str = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
+    stdout_str = stdout.decode(
+        'utf-8') if isinstance(stdout, bytes) else stdout
     parts = [line.strip().split(' ', 1)
              for line in stdout_str.strip().split('\n')]
 
@@ -257,7 +260,8 @@ def main():
         description=('Continuously send SIGSTOP and SIGCONT to '
                      'throttle process activity'))
 
-    subparsers = parser.add_subparsers(title='actions', dest='action', required=True)
+    subparsers = parser.add_subparsers(
+        title='actions', dest='action', required=True)
 
     # Parent parser for PID-or-Port options that is seen in multiple
     # commands.
@@ -312,6 +316,7 @@ def main():
     else:
         raise AssertionError(
             "parser.parse_args should have rejected this input already")
+
 
 if __name__ == '__main__':
     sys.exit(main())
