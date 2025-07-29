@@ -22,9 +22,7 @@ idempotent command, ``wake``, that can be used to recover, and if
 confirmed to run successfully is designed to ensure correct
 un-suspension.
 
-The Python 2.7-standard module ``argparse`` is employed to provide
-more usability.  However, with ``argparse`` installed, it is known to
-function on Python 2.6.
+Ratchet requires Python 3.
 
 Usage
 =====
