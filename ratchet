@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import argparse
 import collections
 import datetime
@@ -30,13 +30,14 @@ def port_to_pid(port):
     if p.wait() != 0:
         return None
     else:
-        m = re.match(r'^p(?P<pid>\d+)$', stdout)
+        stdout_str = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
+        m = re.match(r'^p(?P<pid>\d+)$', stdout_str)
 
         if m:
             return int(m.groupdict()['pid'])
         else:
             raise Exception('pid-to-port returns normally but has '
-                            'incomprehensible output: {0}'.format(stdout))
+                            'incomprehensible output: {0}'.format(stdout_str))
 
     raise AssertionError('Unintended branch fallthrough')
 
@@ -99,7 +100,8 @@ def pid_children(root_pid):
     stdout, stderr = p.communicate()
 
     if p.wait() != 0:
-        if stderr == '':
+        stderr_str = stderr.decode('utf-8') if isinstance(stderr, bytes) else stderr
+        if stderr_str == '':
             # ps likes to return 1 when no processes are returned.  It
             # makes no exit-code differentiation between 'erroneous
             # user input', 'no pid', or 'no children of pid', so don't
@@ -107,10 +109,11 @@ def pid_children(root_pid):
             return []
         else:
             raise Exception('process listing did not complete successfully: ' +
-                            stderr)
+                            stderr_str)
 
+    stdout_str = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
     parts = [line.strip().split(' ', 1)
-             for line in stdout.strip().split('\n')]
+             for line in stdout_str.strip().split('\n')]
 
     return [OSProcess(pid=int(pid), argv=argv) for (pid, argv) in parts]
 
@@ -167,7 +170,7 @@ def force_wake(parent_pid):
     for pid in [parent_pid] + [osp.pid for osp in pid_children(parent_pid)]:
         try:
             os.kill(pid, signal.SIGCONT)
-        except:
+        except Exception:
             # Stop at nothing and soldier on, including processes that
             # may disappear for whatever reason (kernel or concurrent
             # user shenanigans, such as kill -9 by an operator)
@@ -192,9 +195,9 @@ def self_test():
     """
     import socket
 
-    print 'Beginning self test...'
+    print('Beginning self test...')
 
-    print '  Testing un-limited speed of a process; for comparison'
+    print('  Testing un-limited speed of a process; for comparison')
 
     TEST_ADDR = ('0.0.0.0', 12341)
 
@@ -220,7 +223,7 @@ def self_test():
             while datetime.datetime.now() < deadline:
                 i += 1
 
-            print '{0}: counted {1} times'.format(title, i)
+            print('{0}: counted {1} times'.format(title, i))
             sys.exit(0)
         else:
             return int(pid)
@@ -228,7 +231,7 @@ def self_test():
     pid = fork_burner('Unthrottled process')
     os.waitpid(pid, 0)
 
-    print '  Testing throttled process; it should loop fewer times'
+    print('  Testing throttled process; it should loop fewer times')
 
     # Deadline comes somewhat safely before the process finishes
     napper_deadline = datetime.datetime.now() + datetime.timedelta(seconds=4)
@@ -237,25 +240,25 @@ def self_test():
     nap_until(pid, napper_deadline, 0.5, 0.1)
     os.waitpid(pid, 0)
 
-    print '  Testing unconditional wake; should terminate'
+    print('  Testing unconditional wake; should terminate')
     pid = fork_burner('Paused process')
     os.kill(pid, signal.SIGSTOP)
     force_wake(pid)
     os.waitpid(pid, 0)
-    print '  Woken.'
+    print('  Woken.')
 
-    print '  Test port-pid resolution'
+    print('  Test port-pid resolution')
     pid = fork_burner('Process just to bind a port')
     found_pid = port_to_pid(TEST_ADDR[1])
     if found_pid != pid:
         raise Exception('Mismatch: created pid was {0}, '
                         'but resolved the pid {1}'.format(pid, found_pid))
     else:
-        print '  ...resolved properly'
+        print('  ...resolved properly')
 
     os.kill(pid, signal.SIGTERM)
 
-    print 'Done.'
+    print('Done.')
 
 
 def main():
@@ -263,7 +266,7 @@ def main():
         description=('Continuously send SIGSTOP and SIGCONT to '
                      'throttle process activity'))
 
-    subparsers = parser.add_subparsers(title='actions', dest='action')
+    subparsers = parser.add_subparsers(title='actions', dest='action', required=True)
 
     # Parent parser for PID-or-Port options that is seen in multiple
     # commands.
@@ -297,12 +300,12 @@ def main():
 
     # If a port was provided instead of a pid, canonicalize by finding
     # the pid and writing it into the args value.
-    if hasattr(args, 'port'):
+    if hasattr(args, 'port') and args.port is not None:
         pid = port_to_pid(args.port)
         if pid is None:
-            print ('Could not resolve port {0} to a PID'
-                   ' (is ratchet running with sufficient permissions?)'
-                   .format(args.port))
+            print('Could not resolve port {0} to a PID'
+                  ' (is ratchet running with sufficient permissions?)'
+                  .format(args.port))
             return 1
         else:
             args.pid = pid
