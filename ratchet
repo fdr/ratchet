@@ -49,8 +49,6 @@ class OSProcess(collections.namedtuple(
         def contains(s):
             return self.argv.find(s) >= 0
 
-        is_postmaster = contains('-D') and contains('config_file=')
-
         # Don't throttle the archiver; its progress is how the
         # situation is freed up.
         is_archiver = contains('archiver')
@@ -76,7 +74,6 @@ class OSProcess(collections.namedtuple(
         is_wal_writer_or_bgwriter = contains('writer')
 
         return any([
-                   is_postmaster,
                    is_archiver,
                    is_logcollector,
                    is_checkpoint_action,
@@ -129,20 +126,10 @@ def force_naptime(parent_pid, nap_quantum):
     SIGSTOP = signal.SIGSTOP
     parent_pid = int(parent_pid)
 
-    # Record stopped processes before actually sending the signal;
-    # since spurious SIGCONTs are mostly harmless but dangling
-    # SIGSTOPs are dangerous, optimize for sending SIGCONT even if
-    # there is no preceding SIGSTOP in error cases.
-    children_maybe_stopped = set()
-
     def stop_pid_and_record(pid):
-        children_maybe_stopped.add(pid)
         os.kill(pid, SIGSTOP)
 
     try:
-        # Stop the parent first, so it cannot create children.
-        os.kill(parent_pid, SIGSTOP)
-
         children = pid_children(parent_pid)
 
         # Send SIGSTOP to children, unless they are deemed immune from
@@ -203,30 +190,34 @@ def self_test():
 
     def fork_burner(title):
         deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
-        pid = os.fork()
-        if pid == 0:
-            # Have a soon-zombie child process to exercise some other
-            # code paths.
-            if os.fork() == 0:
+        pid_1 = os.fork()
+        if pid_1 == 0:
+            pid_2 = os.fork()
+            if pid_2 != 0:
+                # In the topological equivalent of postmaster, which
+                # listens to ports and has a child process that is
+                # slowed down alternating SIGSTOP/SIGCONT.
+                #
+                # Listen on a socket to test the port-to-pid resolution.
+                # Vestigial in tests that do not support it, and
+                # cleared/freed by exiting the entire process.
+                s = socket.socket()
+                s.bind(TEST_ADDR)
+                s.listen(0)
+                os.waitpid(pid_2, 0)
                 sys.exit(0)
+            else:
+                # In the topological equivalent of child of
+                # postmaster, which does work that is slowed down by
+                # SIGSTOP/SIGCONT.
+                i = 0
+                while datetime.datetime.now() < deadline:
+                    i += 1
 
-            # In this flow of control: in the victim/child process
-
-            # Listen on a socket to test the port-to-pid resolution.
-            # Vestigial in tests that do not support it, and
-            # cleared/freed by exiting the entire process.
-            s = socket.socket()
-            s.bind(TEST_ADDR)
-            s.listen(0)
-
-            i = 0
-            while datetime.datetime.now() < deadline:
-                i += 1
-
-            print('{0}: counted {1} times'.format(title, i))
-            sys.exit(0)
+                print('{0}: counted {1} times'.format(title, i))
+                sys.exit(0)
         else:
-            return int(pid)
+            return int(pid_1)
 
     pid = fork_burner('Unthrottled process')
     os.waitpid(pid, 0)
